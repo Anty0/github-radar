@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+"""Render gh_report.py JSON into a self-contained HTML artifact for Cowork.
+
+Usage:
+    python3 render_report.py [picks.json] < report.json > report.html
+
+The optional picks.json is supplied by the daily agent after it has read
+report.json and reasoned about what's important. Expected shape:
+
+    {
+      "critical": [
+        { "repo": "...", "number": 123, "reason": "why this is critical",
+          "title": "optional override", "url": "optional override",
+          "kind": "issue|pr|discussion" }, ...
+      ],
+      "top_picks": [
+        { "repo": "...", "number": 456, "reason": "why this is a good pick today" }, ...
+      ],
+      "agent_summary": "optional one-line narrative shown under the header"
+    }
+
+If the picks file is missing or empty, the Critical and Top picks sections
+render as "Nothing flagged today." — never auto-populated.
+"""
+import json
+import html
+import sys
+from datetime import datetime, timezone
+
+
+SECTION_META = [
+    ("critical", "Critical / urgent",                  "items the daily agent flagged as critical for today"),
+    ("top_picks", "Top picks for today",               "1–3 things the daily agent chose for you to tackle today"),
+    ("assigned", "Assigned to you",                    "open issues / PRs where you're an assignee"),
+    ("authored", "Authored by you",                    "open issues / PRs you opened"),
+    ("review_requested", "Reviews requested",          "open PRs waiting for your review"),
+    ("threads_waiting", "Threads waiting on you",      "items where you commented and someone has replied since"),
+    ("mentions_unanswered", "Mentions, no reply yet",  "items where you were @-mentioned and haven't replied"),
+    ("new_unattended", "New & unattended",             "items <14 days old, no assignee/reviewer, no comments"),
+    ("new_discussions", "New discussions (no replies)","discussions <14 days old with zero comments"),
+    ("stale_closed", "Closed by bots in last 7d",      "items you were involved in, closed automatically — review if anything matters"),
+    ("recent_merges_uninvolved", "Recently merged without you", "PRs merged in last 7d in repos you care about, where you had no involvement"),
+]
+
+
+def esc(s):
+    return html.escape(str(s) if s is not None else "")
+
+
+def kind_badge(kind):
+    if kind == "pr":   return '<span class="kind pr">PR</span>'
+    if kind == "discussion": return '<span class="kind disc">Disc</span>'
+    return '<span class="kind issue">Issue</span>'
+
+
+def label_chips(labels):
+    return "".join(f'<span class="lbl">{esc(l)}</span>' for l in (labels or [])[:6])
+
+
+def render_item(it, show_reason=False, show_closed_by=False, show_threads=False):
+    title = esc(it.get("title", ""))
+    url = esc(it.get("url", ""))
+    repo = esc(it.get("repo", ""))
+    num = esc(it.get("number", ""))
+    author = esc(it.get("author") or "?")
+    parts = [f'<div class="item">']
+    parts.append(f'<div class="row1">{kind_badge(it.get("kind","issue"))}')
+    parts.append(f'  <a href="{url}" target="_blank" rel="noopener" class="title">{title}</a>')
+    parts.append(f'  <span class="ref">{repo}#{num}</span>')
+    parts.append(f'</div>')
+    extras = []
+    if it.get("author"):
+        extras.append(f'by {author}')
+    if it.get("assignees"):
+        extras.append(f'assignees: {esc(", ".join(it["assignees"]))}')
+    if show_threads and it.get("threads_waiting"):
+        extras.append(f'<span class="warn">{it["threads_waiting"]} thread(s) waiting</span>')
+    if show_closed_by and it.get("closed_by"):
+        extras.append(f'<span class="warn">closed by {esc(it["closed_by"])}</span>')
+    if show_reason and it.get("_reason"):
+        extras.append(f'<span class="reason">{esc(it["_reason"])}</span>')
+    if it.get("created_at"):
+        extras.append(f'opened {esc(it["created_at"][:10])}')
+    parts.append(f'<div class="row2">{" · ".join(extras)}</div>')
+    if it.get("labels"):
+        parts.append(f'<div class="row3">{label_chips(it["labels"])}</div>')
+    parts.append('</div>')
+    return "\n".join(parts)
+
+
+def render_repo_group(grp, **kw):
+    repo = esc(grp["repo"])
+    items_html = "\n".join(render_item(it, **kw) for it in grp["items"])
+    return f'<div class="repo"><div class="repo-name">{repo} <span class="count">({len(grp["items"])})</span></div>{items_html}</div>'
+
+
+def render_section(key, data, title, hint):
+    if isinstance(data, dict) and data.get("_error"):
+        body = f'<div class="empty err">Error: {esc(data["_error"])}</div>'
+        count = "!"
+    elif key in ("critical", "top_picks"):
+        items = data or []
+        if not items:
+            body = '<div class="empty">Nothing here.</div>'
+        else:
+            body = "\n".join(render_item(it, show_reason=(key == "top_picks"), show_threads=True, show_closed_by=True) for it in items)
+        count = len(items)
+    else:
+        grps = data or []
+        total = sum(len(g["items"]) for g in grps if isinstance(g, dict))
+        if not total:
+            body = '<div class="empty">Nothing here.</div>'
+        else:
+            body = "\n".join(
+                render_repo_group(g,
+                                  show_threads=(key in ("threads_waiting", "mentions_unanswered")),
+                                  show_closed_by=(key == "stale_closed"))
+                for g in grps if isinstance(g, dict)
+            )
+        count = total
+    open_attr = " open" if key in ("critical", "top_picks") or (isinstance(count, int) and count > 0 and key in ("review_requested", "threads_waiting", "mentions_unanswered", "new_unattended", "new_discussions")) else ""
+    return f"""
+<details class="section" id="sec-{key}"{open_attr}>
+  <summary><span class="sec-title">{esc(title)}</span> <span class="sec-count">{esc(count)}</span></summary>
+  <div class="sec-hint">{esc(hint)}</div>
+  {body}
+</details>
+"""
+
+
+def _index_items(report):
+    """Build {(repo, number) -> item dict} across every section, so agent picks
+    can be supplied with just (repo, number, reason) and we fill in the rest."""
+    idx = {}
+    for grp_list in (report.get("sections") or {}).values():
+        if not isinstance(grp_list, list):
+            continue
+        for grp in grp_list:
+            if not isinstance(grp, dict):
+                continue
+            for it in grp.get("items", []) or []:
+                key = (it.get("repo"), it.get("number"))
+                if key not in idx:
+                    idx[key] = it
+    return idx
+
+
+def _resolve_pick(pick, item_idx):
+    """Merge agent-supplied minimal pick with the full item from the report."""
+    if not isinstance(pick, dict):
+        return None
+    repo = pick.get("repo")
+    number = pick.get("number")
+    base = item_idx.get((repo, number)) or {}
+    merged = {**base, **{k: v for k, v in pick.items() if v is not None}}
+    # Normalise the reason field — accept either `reason` or `_reason`
+    if "reason" in merged and "_reason" not in merged:
+        merged["_reason"] = merged["reason"]
+    # Bare minimum so the item still renders if the agent supplied an unknown item
+    merged.setdefault("kind", "issue")
+    merged.setdefault("title", pick.get("title", f"{repo}#{number}"))
+    merged.setdefault("repo", repo)
+    merged.setdefault("number", number)
+    merged.setdefault("url", pick.get("url") or "")
+    return merged
+
+
+def render(report, picks=None):
+    picks = picks or {}
+    item_idx = _index_items(report)
+    critical = [p for p in (_resolve_pick(p, item_idx) for p in picks.get("critical") or []) if p]
+    top_picks = [p for p in (_resolve_pick(p, item_idx) for p in picks.get("top_picks") or []) if p]
+    agent_summary = picks.get("agent_summary")
+
+    gen = report.get("generated_at", "")
+    try:
+        dt = datetime.fromisoformat(gen.replace("Z", "+00:00"))
+        gen_human = dt.strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        gen_human = gen
+
+    viewer = esc(report.get("viewer", ""))
+    orgs = ", ".join(report.get("orgs", []))
+    sections_data = report.get("sections", {}) or {}
+
+    section_blocks = []
+    for key, title, hint in SECTION_META:
+        if key == "critical":
+            data = critical
+        elif key == "top_picks":
+            data = top_picks
+        else:
+            data = sections_data.get(key)
+        section_blocks.append(render_section(key, data, title, hint))
+
+    body = "\n".join(section_blocks)
+
+    style = """
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+       color: #1f2328; background: transparent; margin: 0; padding: 0; }
+.header { padding: 14px 18px 8px; border-bottom: 1px solid #d0d7de; }
+.header h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+.header .meta { color: #57606a; font-size: 12px; }
+.section { border-bottom: 1px solid #eaeef2; padding: 8px 16px; }
+.section summary { cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 6px 2px;
+                   list-style: none; font-weight: 600; }
+.section summary::-webkit-details-marker { display: none; }
+.section summary::before { content: "▸"; font-size: 11px; color: #57606a; transition: transform .15s; }
+.section[open] summary::before { transform: rotate(90deg); }
+.sec-title { flex: 1; }
+.sec-count { background: #eaeef2; color: #1f2328; border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+.sec-hint { color: #57606a; font-size: 12px; padding: 2px 0 8px 16px; }
+.repo { margin: 6px 0 12px; }
+.repo-name { font-size: 12px; font-weight: 600; color: #57606a; padding: 6px 8px; background: #f6f8fa;
+             border-left: 3px solid #d0d7de; border-radius: 3px; margin-bottom: 4px; }
+.repo-name .count { font-weight: 400; }
+.item { padding: 6px 8px 6px 14px; border-left: 2px solid transparent; margin: 2px 0; }
+.item:hover { background: #f6f8fa; border-left-color: #0969da; }
+.row1 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.title { color: #0969da; text-decoration: none; font-weight: 500; flex: 1; min-width: 0; }
+.title:hover { text-decoration: underline; }
+.ref { color: #57606a; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.row2 { color: #57606a; font-size: 12px; margin-top: 2px; padding-left: 30px; }
+.row3 { padding-left: 30px; margin-top: 3px; }
+.kind { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.kind.pr { background: #ddf4ff; color: #0550ae; }
+.kind.issue { background: #dafbe1; color: #1a7f37; }
+.kind.disc { background: #fff8c5; color: #7d4e00; }
+.lbl { display: inline-block; padding: 1px 6px; margin: 0 4px 2px 0; background: #eaeef2; color: #1f2328; border-radius: 10px; font-size: 11px; }
+.warn { color: #9a3412; font-weight: 500; }
+.reason { color: #6e40c9; font-style: italic; }
+.empty { color: #57606a; padding: 4px 14px 8px; font-style: italic; font-size: 13px; }
+.empty.err { color: #cf222e; }
+.actions { padding: 8px 18px; border-bottom: 1px solid #d0d7de; display: flex; gap: 8px; }
+.actions button { font: inherit; padding: 4px 12px; border: 1px solid #d0d7de; background: white; border-radius: 6px; cursor: pointer; }
+.actions button:hover { background: #f6f8fa; }
+.actions button:disabled { opacity: 0.6; cursor: wait; }
+#status { color: #57606a; font-size: 12px; align-self: center; }
+.summary { margin-top: 8px; padding: 8px 10px; background: #fff8c5; color: #4d3a00; border-left: 3px solid #d4a017; border-radius: 3px; font-size: 13px; }
+"""
+
+    js = """
+(function(){
+  const btn = document.getElementById('refreshBtn');
+  const status = document.getElementById('status');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    status.textContent = 'Running task — this may take a minute…';
+    try {
+      if (window.cowork && window.cowork.runScheduledTask) {
+        await window.cowork.runScheduledTask('daily-github-todo');
+        status.textContent = 'Task triggered. Refresh this artifact when it finishes.';
+      } else {
+        status.textContent = 'Run from the scheduled-tasks panel.';
+      }
+    } catch (e) {
+      status.textContent = 'Error: ' + (e && e.message || e);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+"""
+
+    summary_html = f'<div class="summary">{esc(agent_summary)}</div>' if agent_summary else ""
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GitHub TODO — {viewer}</title>
+<style>{style}</style>
+</head>
+<body>
+  <div class="header">
+    <h1>GitHub TODO — {viewer}</h1>
+    <div class="meta">Generated {esc(gen_human)} · orgs: {esc(orgs) or "(none)"} (priority order)</div>
+    {summary_html}
+  </div>
+  <div class="actions">
+    <button id="refreshBtn" type="button">Run task now</button>
+    <span id="status"></span>
+  </div>
+  {body}
+<script>{js}</script>
+</body>
+</html>
+"""
+
+
+def main():
+    report = json.load(sys.stdin)
+    picks = None
+    if len(sys.argv) > 1:
+        try:
+            with open(sys.argv[1]) as f:
+                picks = json.load(f)
+        except FileNotFoundError:
+            print(f"Warning: picks file not found: {e}", file=sys.stderr)
+            picks = None
+        except json.JSONDecodeError as e:
+            print(f"Warning: picks file invalid JSON: {e}", file=sys.stderr)
+            picks = None
+    sys.stdout.write(render(report, picks))
+
+
+if __name__ == "__main__":
+    main()
