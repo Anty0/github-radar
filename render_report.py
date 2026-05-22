@@ -196,58 +196,136 @@ def render(report, picks=None):
     body = "\n".join(section_blocks)
 
     style = """
-:root { color-scheme: light; }
+:root {
+  color-scheme: dark;
+  --fg: #e6edf3;
+  --fg-muted: #8b949e;
+  --border-strong: #30363d;
+  --border-soft: #21262d;
+  --surface: #161b22;
+  --surface-hover: #1c2128;
+  --chip-bg: #21262d;
+  --chip-fg: #e6edf3;
+  --link: #58a6ff;
+  --btn-bg: #21262d;
+  --btn-bg-hover: #30363d;
+  --btn-border: #30363d;
+  --badge-pr-bg: rgba(56,139,253,0.18);
+  --badge-pr-fg: #79c0ff;
+  --badge-issue-bg: rgba(63,185,80,0.18);
+  --badge-issue-fg: #56d364;
+  --badge-disc-bg: rgba(187,128,9,0.20);
+  --badge-disc-fg: #e3b341;
+  --warn: #ff8e6b;
+  --reason: #d2a8ff;
+  --error: #ff7b72;
+  --summary-bg: rgba(187,128,9,0.15);
+  --summary-fg: #f0d77c;
+  --summary-border: #d4a017;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --fg: #1f2328;
+  --fg-muted: #57606a;
+  --border-strong: #d0d7de;
+  --border-soft: #eaeef2;
+  --surface: #f6f8fa;
+  --surface-hover: #f6f8fa;
+  --chip-bg: #eaeef2;
+  --chip-fg: #1f2328;
+  --link: #0969da;
+  --btn-bg: #ffffff;
+  --btn-bg-hover: #f6f8fa;
+  --btn-border: #d0d7de;
+  --badge-pr-bg: #ddf4ff;
+  --badge-pr-fg: #0550ae;
+  --badge-issue-bg: #dafbe1;
+  --badge-issue-fg: #1a7f37;
+  --badge-disc-bg: #fff8c5;
+  --badge-disc-fg: #7d4e00;
+  --warn: #9a3412;
+  --reason: #6e40c9;
+  --error: #cf222e;
+  --summary-bg: #fff8c5;
+  --summary-fg: #4d3a00;
+  --summary-border: #d4a017;
+}
 * { box-sizing: border-box; }
 body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-       color: #1f2328; background: transparent; margin: 0; padding: 0; }
-.header { padding: 14px 18px 8px; border-bottom: 1px solid #d0d7de; }
+       color: var(--fg); background: transparent; margin: 0; padding: 0; }
+.header { padding: 14px 18px 8px; border-bottom: 1px solid var(--border-strong); }
 .header h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
-.header .meta { color: #57606a; font-size: 12px; }
-.section { border-bottom: 1px solid #eaeef2; padding: 8px 16px; }
+.header .meta { color: var(--fg-muted); font-size: 12px; }
+.section { border-bottom: 1px solid var(--border-soft); padding: 8px 16px; }
 .section summary { cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 6px 2px;
                    list-style: none; font-weight: 600; }
 .section summary::-webkit-details-marker { display: none; }
-.section summary::before { content: "▸"; font-size: 11px; color: #57606a; transition: transform .15s; }
+.section summary::before { content: "▸"; font-size: 11px; color: var(--fg-muted); transition: transform .15s; }
 .section[open] summary::before { transform: rotate(90deg); }
 .sec-title { flex: 1; }
-.sec-count { background: #eaeef2; color: #1f2328; border-radius: 10px; padding: 1px 8px; font-size: 12px; }
-.sec-hint { color: #57606a; font-size: 12px; padding: 2px 0 8px 16px; }
+.sec-count { background: var(--chip-bg); color: var(--chip-fg); border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+.sec-hint { color: var(--fg-muted); font-size: 12px; padding: 2px 0 8px 16px; }
 .repo { margin: 6px 0 12px; }
-.repo-name { font-size: 12px; font-weight: 600; color: #57606a; padding: 6px 8px; background: #f6f8fa;
-             border-left: 3px solid #d0d7de; border-radius: 3px; margin-bottom: 4px; }
+.repo-name { font-size: 12px; font-weight: 600; color: var(--fg-muted); padding: 6px 8px; background: var(--surface);
+             border-left: 3px solid var(--border-strong); border-radius: 3px; margin-bottom: 4px; }
 .repo-name .count { font-weight: 400; }
 .item { padding: 6px 8px 6px 14px; border-left: 2px solid transparent; margin: 2px 0; }
-.item:hover { background: #f6f8fa; border-left-color: #0969da; }
+.item:hover { background: var(--surface-hover); border-left-color: var(--link); }
 .row1 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.title { color: #0969da; text-decoration: none; font-weight: 500; flex: 1; min-width: 0; }
+.title { color: var(--link); text-decoration: none; font-weight: 500; flex: 1; min-width: 0; }
 .title:hover { text-decoration: underline; }
-.ref { color: #57606a; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
-.row2 { color: #57606a; font-size: 12px; margin-top: 2px; padding-left: 30px; }
+.ref { color: var(--fg-muted); font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.row2 { color: var(--fg-muted); font-size: 12px; margin-top: 2px; padding-left: 30px; }
 .row3 { padding-left: 30px; margin-top: 3px; }
 .kind { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-.kind.pr { background: #ddf4ff; color: #0550ae; }
-.kind.issue { background: #dafbe1; color: #1a7f37; }
-.kind.disc { background: #fff8c5; color: #7d4e00; }
-.lbl { display: inline-block; padding: 1px 6px; margin: 0 4px 2px 0; background: #eaeef2; color: #1f2328; border-radius: 10px; font-size: 11px; }
-.warn { color: #9a3412; font-weight: 500; }
-.reason { color: #6e40c9; font-style: italic; }
-.empty { color: #57606a; padding: 4px 14px 8px; font-style: italic; font-size: 13px; }
-.empty.err { color: #cf222e; }
-.actions { padding: 8px 18px; border-bottom: 1px solid #d0d7de; display: flex; gap: 8px; }
-.actions button { font: inherit; padding: 4px 12px; border: 1px solid #d0d7de; background: white; border-radius: 6px; cursor: pointer; }
-.actions button:hover { background: #f6f8fa; }
+.kind.pr { background: var(--badge-pr-bg); color: var(--badge-pr-fg); }
+.kind.issue { background: var(--badge-issue-bg); color: var(--badge-issue-fg); }
+.kind.disc { background: var(--badge-disc-bg); color: var(--badge-disc-fg); }
+.lbl { display: inline-block; padding: 1px 6px; margin: 0 4px 2px 0; background: var(--chip-bg); color: var(--chip-fg); border-radius: 10px; font-size: 11px; }
+.warn { color: var(--warn); font-weight: 500; }
+.reason { color: var(--reason); font-style: italic; }
+.empty { color: var(--fg-muted); padding: 4px 14px 8px; font-style: italic; font-size: 13px; }
+.empty.err { color: var(--error); }
+.actions { padding: 8px 18px; border-bottom: 1px solid var(--border-strong); display: flex; gap: 8px; }
+.actions button { font: inherit; padding: 4px 12px; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg); border-radius: 6px; cursor: pointer; }
+.actions button:hover { background: var(--btn-bg-hover); }
 .actions button:disabled { opacity: 0.6; cursor: wait; }
-#status { color: #57606a; font-size: 12px; align-self: center; }
-.summary { margin-top: 8px; padding: 8px 10px; background: #fff8c5; color: #4d3a00; border-left: 3px solid #d4a017; border-radius: 3px; font-size: 13px; }
+#status { color: var(--fg-muted); font-size: 12px; align-self: center; }
+.summary { margin-top: 8px; padding: 8px 10px; background: var(--summary-bg); color: var(--summary-fg); border-left: 3px solid var(--summary-border); border-radius: 3px; font-size: 13px; }
 """
 
     js = """
 (function(){
-  const btn = document.getElementById('refreshBtn');
+  const THEME_KEY = 'gh-todo-theme';
+  const themeBtn = document.getElementById('themeBtn');
+  const refreshBtn = document.getElementById('refreshBtn');
   const status = document.getElementById('status');
-  if (!btn) return;
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
+
+  // Theme toggle. Default is dark; user choice persists in localStorage.
+  let currentTheme = 'dark';
+  try { currentTheme = localStorage.getItem(THEME_KEY) || 'dark'; } catch (e) {}
+  function applyTheme(t) {
+    if (t === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+      if (themeBtn) themeBtn.textContent = 'Dark theme';
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+      if (themeBtn) themeBtn.textContent = 'Light theme';
+    }
+  }
+  applyTheme(currentTheme);
+  if (themeBtn) {
+    themeBtn.addEventListener('click', () => {
+      currentTheme = (currentTheme === 'dark') ? 'light' : 'dark';
+      try { localStorage.setItem(THEME_KEY, currentTheme); } catch (e) {}
+      applyTheme(currentTheme);
+    });
+  }
+
+  // Run-task button.
+  if (!refreshBtn) return;
+  refreshBtn.addEventListener('click', async () => {
+    refreshBtn.disabled = true;
     status.textContent = 'Running task — this may take a minute…';
     try {
       if (window.cowork && window.cowork.runScheduledTask) {
@@ -259,9 +337,20 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
     } catch (e) {
       status.textContent = 'Error: ' + (e && e.message || e);
     } finally {
-      btn.disabled = false;
+      refreshBtn.disabled = false;
     }
   });
+})();
+"""
+
+    # Tiny inline script that runs before the body is painted, so a user who has
+    # chosen light theme doesn't see a flash of the (default) dark theme.
+    early_script = """
+(function(){
+  try {
+    var t = localStorage.getItem('gh-todo-theme');
+    if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  } catch (e) {}
 })();
 """
 
@@ -272,6 +361,7 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
 <head>
 <meta charset="utf-8">
 <title>GitHub TODO — {viewer}</title>
+<script>{early_script}</script>
 <style>{style}</style>
 </head>
 <body>
@@ -282,6 +372,7 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
   </div>
   <div class="actions">
     <button id="refreshBtn" type="button">Run task now</button>
+    <button id="themeBtn" type="button">Light theme</button>
     <span id="status"></span>
   </div>
   {body}
