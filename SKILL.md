@@ -3,34 +3,39 @@ name: daily-github-todo
 description: Daily GitHub TODO report
 ---
 
-You are running the daily GitHub TODO report. Each run is a fresh session with no memory of previous runs — everything you need is in this prompt and the two helper scripts sitting next to it.
+You are running the daily GitHub TODO report. Each run is a fresh session with no memory of previous runs — everything you need is in this prompt and the helper scripts sitting next to it.
+
+## Location
+
+When following text mentions `{HOME}`, it refers to `/Users/anty/Documents/Claude/Scheduled/daily-github-todo` path - substitute all `{HOME}` occurences before executing.
+
+## Plan
 
 When you start, call TaskCreate to track your steps, then mark each in_progress / completed as you go:
-  1. Run the report script → report.json
-  2. Read report.json and choose 1–3 top picks (and any critical flags) for today
-  3. Render → report.html and update the artifact
+  0. Run `setup.sh` → produces `$SCRIPTS_DIR/.load-env.sh`
+  1. Run the report script → `$WORK_DIR/report.json`
+  2. Read `report.json` and choose 1–3 top picks (and any critical flags) for today
+  3. Render → `$WORK_DIR/report.html` and update the artifact
 
-The two helper scripts live in this task's own folder:
-  - /Users/anty/Documents/Claude/Scheduled/daily-github-todo/gh_report.py
-  - /Users/anty/Documents/Claude/Scheduled/daily-github-todo/render_report.py
+==========================================================
+STEP 0 — Setup (run this exactly once, first thing).
 
-GitHub credentials (the user's classic PAT, scoped to repo/read:org/discussions). Use it ONLY as the GH_TOKEN env var — never echo it to chat output:
-  GH_TOKEN=ghp_REDACTED
+```bash
+bash "{HOME}/setup.sh"
+```
+
+This prints the resolved `SCRIPTS_DIR` and `WORK_DIR` environment variables and generates `.load-env.sh`.
 
 ==========================================================
 STEP 1 — Generate the report data.
 
-Run this bash command exactly. It writes the categorised report data to $PWD/gh-todo/report.json. The script discovers the user's GitHub login and current org memberships at runtime, so you don't pass them in.
-
 ```bash
 set -euo pipefail
-WORK="$PWD/gh-todo"
-mkdir -p "$WORK"
-export GH_TOKEN='ghp_REDACTED'
-python3 /Users/anty/Documents/Claude/Scheduled/daily-github-todo/gh_report.py \
-  > "$WORK/report.json" 2>"$WORK/timings.txt"
-echo "--- timings ---"; cat "$WORK/timings.txt"
-echo "--- json size ---"; wc -c "$WORK/report.json"
+source "{HOME}/.load-env.sh"
+python3 "$SCRIPTS_DIR/gh_report.py" \
+  > "$WORK_DIR/report.json" 2>"$WORK_DIR/timings.txt"
+echo "--- timings ---"; cat "$WORK_DIR/timings.txt"
+echo "--- json size ---"; wc -c "$WORK_DIR/report.json"
 ```
 
 The script normally completes in 5–30 seconds. If you see a non-zero exit, capture stderr; the failure surface in step 3 is a fallback HTML with the error message.
@@ -38,7 +43,7 @@ The script normally completes in 5–30 seconds. If you see a non-zero exit, cap
 ==========================================================
 STEP 2 — Reason about today's priorities (this is the important part).
 
-Read `$WORK/report.json`. The JSON shape is:
+Read `$WORK_DIR/report.json`. The JSON shape is:
 
 ```
 {
@@ -74,7 +79,9 @@ Each item dict has: repo, number, title, url, kind ("issue"/"pr"/"discussion"), 
     * Skip noise: items that are sitting because they're genuinely blocked on someone else, draft PRs the user just opened, etc.
 - **Agent summary (optional)**: one short sentence framing the day at the top of the artifact. Use it to call out a pattern ("two stale reviews on the mobile SDK are the biggest blocker today"). Skip it if nothing notable.
 
-Write your decision to `$WORK/picks.json` as:
+Validate your picks/critical items by listing comments, review notes and similar related to them using `gh`. If reading comments make you realize the item is not as important, check a few more items before settling on the best pick/critical items you've found.
+
+Write your decision to `$WORK_DIR/picks.json` as:
 
 ```json
 {
@@ -94,22 +101,22 @@ If there's truly nothing critical, send `"critical": []`. If you can't pick anyt
 STEP 3 — Render and update the artifact.
 
 ```bash
-WORK="$PWD/gh-todo"
-python3 /Users/anty/Documents/Claude/Scheduled/daily-github-todo/render_report.py \
-  "$WORK/picks.json" \
-  < "$WORK/report.json" \
-  > "$WORK/report.html"
-wc -c "$WORK/report.html"
-cp "$WORK/report.html" "$PWD/report.html"
-echo "saved at: $PWD/report.html"
+set -euo pipefail
+source "{HOME}/.load-env.sh"
+python3 "$SCRIPTS_DIR/render_report.py" \
+  "$WORK_DIR/picks.json" \
+  < "$WORK_DIR/report.json" \
+  > "$WORK_DIR/report.html"
+wc -c "$WORK_DIR/report.html"
+echo "report at: $WORK_DIR/report.html"
 ```
 
-Quick sanity check: Read the first ~30 lines of report.html to confirm it's well-formed HTML and contains a `<title>GitHub TODO`. If `wc -c` returned < 1000 bytes, write a minimal fallback HTML noting the error from `$WORK/timings.txt` and use that instead.
+Quick sanity check: Read the first ~30 lines of `$WORK_DIR/report.html` to confirm it's well-formed HTML and contains a `<title>GitHub TODO`. If `wc -c` returned < 1000 bytes, write a minimal fallback HTML into `$WORK_DIR/report.html` noting the error from `$WORK_DIR/timings.txt` and use that instead.
 
 Then call `mcp__cowork__update_artifact` with:
   id: "daily-github-todo"
   update_summary: "Daily GitHub TODO refresh — <today's date YYYY-MM-DD>"
-  html_path: <absolute host path to report.html in your outputs folder — take the WORKSPACE FOLDER path from your system prompt and append "/report.html">
+  html_path: the absolute path printed by the bash block above (i.e. `$WORK_DIR/report.html`). Echo it in a bash call if you need the literal to paste.
 
 Do NOT include `mcp_tools`.
 
@@ -120,4 +127,4 @@ Finish with a one-line confirmation in chat:
 > - <repo#num> — <title> (<reason>)
 > - …
 
-Pull those lines from "$WORK/picks.json". If `critical` was non-empty, mention how many critical items you flagged.
+Pull those lines from `$WORK_DIR/picks.json`. If `critical` was non-empty, mention how many critical items you flagged.

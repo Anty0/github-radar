@@ -1,0 +1,6 @@
+# Secrets
+.token
+.load-env.sh
+
+# Per-run outputs (report.json, picks.json, report.html, timings.txt)
+outputs/
