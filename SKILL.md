@@ -50,20 +50,23 @@ Read `$WORK_DIR/report.json`. The JSON shape is:
   "generated_at": "...",
   "viewer": "<user's github login>",
   "orgs": ["<org1>", "<org2>", ...],
+  "solo_scopes": ["<viewer>", "<sole-member-org>", ...],
   "windows": { "two_weeks_ago": "...", "seven_days_ago": "...", "sixty_days_ago": "..." },
   "sections": {
-    "assigned": [{repo, items: [...]}],
+    "assigned": [{repo, items: [...]}],   // includes everything in `solo_scopes`, even without a GH assignee
     "authored": [...],
     "review_requested": [...],
     "threads_waiting": [...],          // each item has `threads_waiting: <int>`
     "mentions_unanswered": [...],      // each item has `threads_waiting: <int>`
-    "new_unattended": [...],
+    "new_unattended": [...],           // solo_scopes skipped — nothing is "unassigned" there
     "new_discussions": [...],
     "stale_closed": [...],             // each item has `closed_by: "<bot login>"`
-    "recent_merges_uninvolved": [...]
+    "recent_merges_uninvolved": [...]  // solo_scopes skipped — nobody else to be involved
   }
 }
 ```
+
+`solo_scopes` = the viewer's personal namespace + any orgs where they're the sole member. The user doesn't use the assignees field in these scopes (no one else to assign to), so the script treats everything open there as implicitly the user's. Keep that in mind when reasoning about priorities — a Anty0/* item with no assignee is still very much "on the user's plate".
 
 Each item dict has: repo, number, title, url, kind ("issue"/"pr"/"discussion"), state, author, assignees, labels, comments, draft, created_at, updated_at. The user wants the daily picks to be **your judgement**, not an algorithm. Read through the report and ask yourself:
 

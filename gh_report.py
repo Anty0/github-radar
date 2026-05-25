@@ -6,16 +6,21 @@ Emits a JSON document on stdout with the day's categorised data:
 
   - viewer: the authenticated login (discovered at runtime)
   - orgs: organisations the viewer belongs to (discovered at runtime, alphabetic)
+  - solo_scopes: the viewer's personal namespace plus any orgs where they are the
+    sole member; items in these scopes are treated as implicitly assigned to the
+    viewer (the user doesn't use the assignees field there because there's nobody
+    else to assign to) and are excluded from "unassigned"-flavoured sections.
   - sections (each grouped by repo, orgs sorted before personal repos):
-      - assigned: issues/PRs assigned to me
+      - assigned: issues/PRs assigned to me, plus everything open in solo scopes
       - authored: issues/PRs I authored
       - review_requested: PRs waiting for my review
       - new_unattended: items <14d old, no assignee/reviewer, no comments
+                       (solo scopes are excluded — nothing is "unassigned" there)
       - new_discussions: discussions <14d old with zero comments
       - threads_waiting: issues/PRs/discussions I commented on, with newer non-bot activity in any thread
       - mentions_unanswered: items where someone @-mentioned me and I haven't replied since
       - stale_closed: items I was involved in, closed by a bot in the last 7d
-      - recent_merges_uninvolved: PRs merged in the last 7d in repos I care about, with no involvement (excluding "review requested but never reviewed")
+      - recent_merges_uninvolved: PRs merged in the last 7d in repos I care about, with no involvement (excluding "review requested but never reviewed"; solo scopes excluded — by definition nobody else is involved there)
 
 This script does NOT produce critical/top_picks — those are the agent's job at render time.
 """
@@ -47,6 +52,10 @@ SIXTY_DAYS_AGO = (NOW - timedelta(days=60)).strftime("%Y-%m-%d")
 # Populated by discover_identity() at the start of main().
 VIEWER = ""
 ORGS = []
+# Scopes treated as "implicitly assigned to the viewer": the viewer's personal
+# namespace plus any orgs where they are the sole member. Populated alongside
+# ORGS by discover_identity().
+SOLO_SCOPES = []
 
 HEADERS = {
     "Authorization": f"bearer {TOKEN}",
@@ -110,17 +119,49 @@ def search_issues(q, limit=200):
 # ---------- identity ----------
 
 def discover_identity():
-    """Fetch viewer login and organisations dynamically. Sets globals VIEWER, ORGS."""
-    global VIEWER, ORGS
-    d = gql("query { viewer { login organizations(first:100) { nodes { login } } } }")
-    if "_error" in d or "errors" in d:
-        raise RuntimeError(f"Cannot fetch viewer identity: {d.get('_error') or d.get('errors')}")
+    """Fetch viewer login, organisations, and sole-member orgs dynamically.
+
+    Sets globals VIEWER, ORGS, SOLO_SCOPES.
+
+    An org counts as "solo" when membersWithRole.totalCount == 1 (just the
+    viewer). The viewer's personal namespace is always solo. Orgs where the
+    membersWithRole field returns null (insufficient permission) default to
+    "not solo" — conservative, since we'd rather treat a multi-member org as
+    needing explicit assignment than the other way round.
+    """
+    global VIEWER, ORGS, SOLO_SCOPES
+    d = gql("""query {
+      viewer {
+        login
+        organizations(first:100) {
+          nodes {
+            login
+            membersWithRole(first:2) { totalCount }
+          }
+        }
+      }
+    }""")
+    if "_error" in d:
+        raise RuntimeError(f"Cannot fetch viewer identity: {d.get('_error')}")
     v = d.get("data", {}).get("viewer", {}) or {}
     VIEWER = v.get("login") or ""
     if not VIEWER:
         raise RuntimeError("Empty viewer login")
-    orgs = [(n or {}).get("login") for n in (v.get("organizations", {}) or {}).get("nodes", []) or []]
-    ORGS = sorted([o for o in orgs if o], key=str.lower)
+    nodes = (v.get("organizations", {}) or {}).get("nodes", []) or []
+    orgs = []
+    solo = {VIEWER}  # personal namespace is always solo
+    for n in nodes:
+        if not n:
+            continue
+        login = n.get("login")
+        if not login:
+            continue
+        orgs.append(login)
+        mwr = n.get("membersWithRole") or {}
+        if mwr.get("totalCount") == 1:
+            solo.add(login)
+    ORGS = sorted(orgs, key=str.lower)
+    SOLO_SCOPES = sorted(solo, key=str.lower)
 
 
 # ---------- helpers ----------
@@ -186,9 +227,24 @@ def group_by_repo(items):
 # ---------- section queries ----------
 
 def section_assigned():
+    """Open issues/PRs assigned to me, plus everything open in solo scopes.
+
+    Items in personal repos and sole-member orgs are treated as implicitly
+    assigned to the viewer (since there's nobody else to assign), even when
+    no GitHub `assignees` field is set.
+    """
     items = search_issues(f"is:open assignee:{VIEWER}")
-    if isinstance(items, dict): return items
-    return group_by_repo([to_obj(i) for i in items])
+    if isinstance(items, dict):
+        return items
+    by_key = {(repo_of(i), i["number"]): i for i in items}
+    for scope in SOLO_SCOPES:
+        qualifier = "user" if scope == VIEWER else "org"
+        more = search_issues(f"is:open {qualifier}:{scope}", limit=300)
+        if isinstance(more, dict):
+            continue
+        for it in more:
+            by_key.setdefault((repo_of(it), it["number"]), it)
+    return group_by_repo([to_obj(i) for i in by_key.values()])
 
 
 def section_authored():
@@ -204,9 +260,14 @@ def section_review_requested():
 
 
 def section_new_unattended():
-    """Issues/PRs created < 14d ago, no assignee, no reviewer, no comments."""
+    """Issues/PRs created < 14d ago, no assignee, no reviewer, no comments.
+
+    Solo scopes (personal repos, sole-member orgs) are skipped because the
+    viewer doesn't use assignees there — items would always look "unattended"
+    but they're already implicitly the viewer's via `section_assigned`.
+    """
     out = []
-    scopes = [f"org:{o}" for o in ORGS] + [f"user:{VIEWER}"]
+    scopes = [f"org:{o}" for o in ORGS if o not in SOLO_SCOPES]
     raw = []
     for scope in scopes:
         q = f"is:open no:assignee comments:0 created:>={TWO_WEEKS_AGO} {scope}"
@@ -500,11 +561,12 @@ def section_recent_merges_uninvolved():
     """PRs merged in last 7d in repos I care about, where I had zero involvement.
 
     Per the spec, "review requested but never reviewed" does NOT count as involvement.
+    Solo scopes are skipped — by definition there's nobody else to be involved.
     """
     out = []
     # Use search; the qualifier `-involves:` treats review-requested as involvement, so we add it back via post-filter.
     # Strategy per scope: search merged:>=7d -author:me -assignee:me -commenter:me -mentions:me
-    scopes = [f"org:{o}" for o in ORGS] + [f"user:{VIEWER}"]
+    scopes = [f"org:{o}" for o in ORGS if o not in SOLO_SCOPES]
     for scope in scopes:
         q = (
             f"is:pr is:merged merged:>={SEVEN_DAYS_AGO} {scope} "
@@ -524,6 +586,7 @@ def main():
     discover_identity()
     print(f"  viewer: {VIEWER}", file=sys.stderr)
     print(f"  orgs:   {', '.join(ORGS) or '(none)'}", file=sys.stderr)
+    print(f"  solo:   {', '.join(SOLO_SCOPES) or '(none)'}", file=sys.stderr)
 
     section_fns = {
         "assigned": section_assigned,
@@ -549,6 +612,7 @@ def main():
         "generated_at": NOW.isoformat(),
         "viewer": VIEWER,
         "orgs": ORGS,
+        "solo_scopes": SOLO_SCOPES,
         "windows": {
             "two_weeks_ago": TWO_WEEKS_AGO,
             "seven_days_ago": SEVEN_DAYS_AGO,
