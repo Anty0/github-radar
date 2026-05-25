@@ -79,7 +79,27 @@ Each item dict has: repo, number, title, url, kind ("issue"/"pr"/"discussion"), 
     * Skip noise: items that are sitting because they're genuinely blocked on someone else, draft PRs the user just opened, etc.
 - **Agent summary (optional)**: one short sentence framing the day at the top of the artifact. Use it to call out a pattern ("two stale reviews on the mobile SDK are the biggest blocker today"). Skip it if nothing notable.
 
-Validate your picks/critical items by listing comments, review notes and similar related to them using `gh`. If reading comments make you realize the item is not as important, check a few more items before settling on the best pick/critical items you've found.
+Validate your picks/critical items by listing comments, review notes, and similar context using `gh` (already on PATH and authenticated via `GH_TOKEN` after sourcing `.load-env.sh`). Useful one-liners:
+
+```bash
+# Issue / PR metadata + last few comments
+gh issue view 3201 --repo tolgee/tolgee-platform --comments
+gh pr view 3201 --repo tolgee/tolgee-platform --comments
+
+# PR review state (approved / changes-requested / pending)
+gh api repos/tolgee/tolgee-platform/pulls/3201/reviews \
+  --jq '.[] | {user: .user.login, state, submitted_at}'
+
+# Discussions (GraphQL only — gh has no first-class discussion subcommand)
+gh api graphql -f query='
+  query($owner:String!,$name:String!,$number:Int!){
+    repository(owner:$owner,name:$name){
+      discussion(number:$number){ title updatedAt
+        comments(last:5){ nodes { author{login} createdAt body } } } } }
+' -F owner=tolgee -F name=tolgee-platform -F number=3685
+```
+
+If reading comments makes you realize an item is less important than it looked, check a few more candidates before settling.
 
 Write your decision to `$WORK_DIR/picks.json` as:
 
