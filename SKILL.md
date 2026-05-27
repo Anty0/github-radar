@@ -151,3 +151,5 @@ Finish with a one-line confirmation in chat:
 > - …
 
 Pull those lines from `$WORK_DIR/picks.json`. If `critical` was non-empty, mention how many critical items you flagged.
+
+If — and only if — you hit any issues during the run (script errors, unexpected gh failures, missing data, scope problems, fallbacks you had to take, anything you had to work around), append a short `**Issues encountered:**` section below the confirmation. Keep it to a few bullets, one line each, naming the step and what happened. Omit the section entirely when the run was butter smooth.
