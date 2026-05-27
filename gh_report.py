@@ -49,6 +49,12 @@ SEVEN_DAYS_AGO = SEVEN_DAYS_AGO_ISO.strftime("%Y-%m-%d")
 THIRTY_DAYS_AGO = (NOW - timedelta(days=30)).strftime("%Y-%m-%d")
 SIXTY_DAYS_AGO = (NOW - timedelta(days=60)).strftime("%Y-%m-%d")
 
+# Extra orgs to fold into ORGS that the token cannot enumerate on its own —
+# e.g. orgs where your membership is private and visible only to a classic
+# read:org token. Comma-separated, e.g. EXTRA_ORGS="acme,Erasmus2016".
+# Left empty by default; data reads still work for any public repo within them.
+EXTRA_ORGS = [o.strip() for o in os.environ.get("EXTRA_ORGS", "").split(",") if o.strip()]
+
 # Populated by discover_identity() at the start of main().
 VIEWER = ""
 ORGS = []
@@ -99,8 +105,15 @@ def gql(query, variables=None):
     return _req("https://api.github.com/graphql", data=payload, method="POST")
 
 
-def search_issues(q, limit=200):
-    """REST search/issues with pagination; returns list of items."""
+def _has_type_qualifier(q):
+    """True if the query already constrains result type (issue vs PR)."""
+    ql = q.lower()
+    return any(t in ql for t in ("is:issue", "is:pr", "is:pull-request",
+                                 "type:issue", "type:pr", "type:pull-request"))
+
+
+def _search_issues_single(q, limit=200):
+    """REST search/issues with pagination; returns list of items (one query)."""
     out = []
     page = 1
     while True:
@@ -116,28 +129,70 @@ def search_issues(q, limit=200):
     return out[:limit]
 
 
+def search_issues(q, limit=200):
+    """REST search/issues, returning both issues and PRs.
+
+    GitHub's search API now rejects any query that doesn't constrain the result
+    type ("Query must include 'is:issue' or 'is:pull-request'"), and a single
+    query can only return one type. To keep callers type-agnostic, a query with
+    no type qualifier is run once per type and the results are merged; queries
+    that already specify a type pass through unchanged.
+    """
+    if _has_type_qualifier(q):
+        return _search_issues_single(q, limit=limit)
+    out = []
+    seen = set()
+    for t in ("is:issue", "is:pull-request"):
+        part = _search_issues_single(f"{q} {t}", limit=limit)
+        if isinstance(part, dict):  # propagate first error
+            return part
+        for it in part:
+            key = (it.get("repository_url"), it.get("number"))
+            if key not in seen:
+                seen.add(key)
+                out.append(it)
+    return out[:limit]
+
+
 # ---------- identity ----------
+
+def _org_member_count_le2(login):
+    """Best-effort member count (capped at 2) via REST.
+
+    Returns an int (1 or 2) when the token can list the org's members, or None
+    when that listing is forbidden/unavailable. Kept separate from org
+    enumeration so a permission failure here can never drop an org from ORGS.
+    """
+    d = _req(f"https://api.github.com/orgs/{login}/members?per_page=2")
+    if isinstance(d, list):
+        return len(d)
+    return None  # forbidden / error → caller treats as "not solo"
+
 
 def discover_identity():
     """Fetch viewer login, organisations, and sole-member orgs dynamically.
 
     Sets globals VIEWER, ORGS, SOLO_SCOPES.
 
-    An org counts as "solo" when membersWithRole.totalCount == 1 (just the
-    viewer). The viewer's personal namespace is always solo. Orgs where the
-    membersWithRole field returns null (insufficient permission) default to
-    "not solo" — conservative, since we'd rather treat a multi-member org as
-    needing explicit assignment than the other way round.
+    Org enumeration deliberately requests ONLY the org login — no
+    membersWithRole sub-field. A fine-grained token scoped to one org gets a
+    FORBIDDEN error on membersWithRole for *other* orgs, and GraphQL responds by
+    nulling the entire org node, which would otherwise silently drop that org
+    (e.g. tolgee) from the report. EXTRA_ORGS is unioned in afterwards for orgs
+    the token can't enumerate at all (private membership).
+
+    Solo detection runs as a separate, error-tolerant REST pass: an org counts
+    as "solo" when it has exactly one visible member (just the viewer). The
+    viewer's personal namespace is always solo. Orgs whose membership can't be
+    read default to "not solo" — conservative, since we'd rather treat a
+    multi-member org as needing explicit assignment than the other way round.
     """
     global VIEWER, ORGS, SOLO_SCOPES
     d = gql("""query {
       viewer {
         login
         organizations(first:100) {
-          nodes {
-            login
-            membersWithRole(first:2) { totalCount }
-          }
+          nodes { login }
         }
       }
     }""")
@@ -148,18 +203,24 @@ def discover_identity():
     if not VIEWER:
         raise RuntimeError("Empty viewer login")
     nodes = (v.get("organizations", {}) or {}).get("nodes", []) or []
+
     orgs = []
-    solo = {VIEWER}  # personal namespace is always solo
+    seen = set()
     for n in nodes:
-        if not n:
-            continue
-        login = n.get("login")
-        if not login:
-            continue
-        orgs.append(login)
-        mwr = n.get("membersWithRole") or {}
-        if mwr.get("totalCount") == 1:
+        login = n.get("login") if n else None
+        if login and login not in seen:
+            seen.add(login)
+            orgs.append(login)
+    for login in EXTRA_ORGS:  # orgs the token can't enumerate (private membership)
+        if login not in seen:
+            seen.add(login)
+            orgs.append(login)
+
+    solo = {VIEWER}  # personal namespace is always solo
+    for login in orgs:
+        if _org_member_count_le2(login) == 1:
             solo.add(login)
+
     ORGS = sorted(orgs, key=str.lower)
     SOLO_SCOPES = sorted(solo, key=str.lower)
 
