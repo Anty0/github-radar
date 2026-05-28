@@ -57,17 +57,30 @@ def label_chips(labels):
     return "".join(f'<span class="lbl">{esc(l)}</span>' for l in (labels or [])[:6])
 
 
-def render_item(it, show_reason=False, show_closed_by=False, show_threads=False):
+def render_item(it, section_key="", show_reason=False, show_closed_by=False, show_threads=False):
     title = esc(it.get("title", ""))
     url = esc(it.get("url", ""))
     repo = esc(it.get("repo", ""))
     num = esc(it.get("number", ""))
     author = esc(it.get("author") or "?")
     owner_attr = esc(_owner_of(it))
-    parts = [f'<div class="item" data-org="{owner_attr}">']
+    updated = esc(it.get("updated_at") or "")
+    item_key = f'{repo}#{num}'
+    item_attrs = [
+        f'data-org="{owner_attr}"',
+        f'data-key="{esc(item_key)}"',
+    ]
+    if section_key:
+        item_attrs.append(f'data-section="{esc(section_key)}"')
+    if updated:
+        item_attrs.append(f'data-updated="{updated}"')
+    parts = [f'<div class="item" {" ".join(item_attrs)}>']
     parts.append(f'<div class="row1">{kind_badge(it.get("kind","issue"))}')
     parts.append(f'  <a href="{url}" target="_blank" rel="noopener" class="title">{title}</a>')
     parts.append(f'  <span class="ref">{repo}#{num}</span>')
+    parts.append(f'  <span class="dismissed-tag">dismissed</span>')
+    if section_key and updated:
+        parts.append(f'  <button class="dismiss-btn" type="button" title="Dismiss until any GitHub update">✕</button>')
     parts.append(f'</div>')
     extras = []
     if it.get("author"):
@@ -89,10 +102,10 @@ def render_item(it, show_reason=False, show_closed_by=False, show_threads=False)
     return "\n".join(parts)
 
 
-def render_repo_group(grp, **kw):
+def render_repo_group(grp, section_key="", **kw):
     repo = esc(grp["repo"])
     owner_attr = esc(_owner_of(grp))
-    items_html = "\n".join(render_item(it, **kw) for it in grp["items"])
+    items_html = "\n".join(render_item(it, section_key=section_key, **kw) for it in grp["items"])
     return f'<div class="repo" data-org="{owner_attr}"><div class="repo-name">{repo} <span class="count">({len(grp["items"])})</span></div>{items_html}</div>'
 
 
@@ -105,7 +118,7 @@ def render_section(key, data, title, hint):
         if not items:
             body = '<div class="empty">Nothing here.</div>'
         else:
-            body = "\n".join(render_item(it, show_reason=(key == "top_picks"), show_threads=True, show_closed_by=True) for it in items)
+            body = "\n".join(render_item(it, section_key=key, show_reason=(key == "top_picks"), show_threads=True, show_closed_by=True) for it in items)
         count = len(items)
     else:
         grps = data or []
@@ -115,6 +128,7 @@ def render_section(key, data, title, hint):
         else:
             body = "\n".join(
                 render_repo_group(g,
+                                  section_key=key,
                                   show_threads=(key in ("threads_waiting", "mentions_unanswered")),
                                   show_closed_by=(key == "stale_closed"))
                 for g in grps if isinstance(g, dict)
@@ -275,9 +289,12 @@ def render(report, picks=None):
     else:
         filter_bar_html = ""
 
-    # Embed precalculated section counts so the JS can update sec-count badges
-    # instantly without walking the DOM. Escape </script> sequences defensively.
-    counts_json = json.dumps(sec_counts, separators=(",", ":")).replace("</", "<\\/")
+    # sec_counts was previously injected as a JS constant so the org-filter
+    # could update badges without walking the DOM. With dismissals in the
+    # mix the badges have to be derived from the live DOM anyway, so we
+    # drop the constant and rely on the server-rendered initial counts as
+    # the first paint.
+    _ = sec_counts  # noqa: F841 — kept for future use
 
     style = """
 :root {
@@ -386,14 +403,34 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
 .filter-btn .cnt { margin-left: 5px; font-size: 11px; opacity: 0.75; font-variant-numeric: tabular-nums; }
 .filter-btn.active .cnt { opacity: 0.95; }
 .filter-empty { color: var(--fg-muted); padding: 4px 14px 8px; font-style: italic; font-size: 13px; }
+.dismiss-btn { background: transparent; border: 1px solid transparent; color: var(--fg-muted);
+               font-size: 12px; line-height: 1; padding: 2px 7px; border-radius: 4px;
+               cursor: pointer; opacity: 0.35; transition: opacity .12s, background .12s, color .12s;
+               margin-left: auto; }
+.item:hover .dismiss-btn { opacity: 0.95; }
+.dismiss-btn:hover { background: var(--btn-bg-hover); border-color: var(--btn-border); color: var(--fg); }
+.item.dismissed { opacity: 0.45; }
+.item.dismissed:hover { opacity: 1; }
+.dismissed-tag { display: none; padding: 1px 6px; border-radius: 10px; font-size: 10px;
+                 font-weight: 500; background: var(--chip-bg); color: var(--fg-muted);
+                 text-transform: uppercase; letter-spacing: 0.4px; }
+.item.dismissed .dismissed-tag { display: inline-block; }
+.show-dismissed { display: inline-flex; align-items: center; gap: 5px; color: var(--fg-muted);
+                  font-size: 12px; cursor: pointer; user-select: none; }
+.show-dismissed input { margin: 0; cursor: pointer; }
 """
 
     js = """
 (function(){
-  const THEME_KEY = 'gh-todo-theme';
-  const themeBtn = document.getElementById('themeBtn');
+  const THEME_KEY           = 'gh-todo-theme';
+  const ORG_FILTER_KEY      = 'gh-todo-org-filter';
+  const DISMISS_KEY         = 'gh-todo-dismiss';
+  const SHOW_DISMISSED_KEY  = 'gh-todo-show-dismissed';
+
+  const themeBtn   = document.getElementById('themeBtn');
   const refreshBtn = document.getElementById('refreshBtn');
-  const status = document.getElementById('status');
+  const showCb     = document.getElementById('showDismissedCb');
+  const status     = document.getElementById('status');
 
   // Theme toggle. Default is dark; user choice persists in localStorage.
   let currentTheme = 'dark';
@@ -416,50 +453,158 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
     });
   }
 
-  // Organisation filter. COUNTS is injected by the renderer; shape is
-  // {section_key: {owner: count, "_all": total}}.
-  const ORG_FILTER_KEY = 'gh-todo-org-filter';
-  const COUNTS = __COUNTS_JSON__;
+  // ---- Dismissals state -----------------------------------------------
+  // A dismissal stores the item's updated_at at the moment of dismissal. On
+  // every render we drop entries whose updated_at no longer matches — i.e.
+  // any GitHub-side change (label, comment, merge, anything that bumps
+  // updated_at) un-dismisses the item. Bot updates count, per spec.
+  function loadDismissals() {
+    try {
+      const raw = localStorage.getItem(DISMISS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  }
+  function saveDismissals() {
+    try { localStorage.setItem(DISMISS_KEY, JSON.stringify(dismissals)); } catch (e) {}
+  }
+  let dismissals = loadDismissals();
 
-  function applyOrgFilter(org) {
-    if (!org) org = '_all';
-    document.body.setAttribute('data-org-filter', org);
-    // Hide non-matching items and repo groups.
-    document.querySelectorAll('.item, .repo').forEach(el => {
-      const elOrg = el.getAttribute('data-org');
-      const visible = (org === '_all') || (elOrg === org);
+  // Drop stale entries for items present in this render whose updated_at
+  // has changed. Entries for items not in this render are left alone — if
+  // they come back later we'll re-check then.
+  let dismissChanged = false;
+  document.querySelectorAll('.item[data-section][data-updated]').forEach(el => {
+    const sec = el.getAttribute('data-section');
+    const k   = el.getAttribute('data-key');
+    const u   = el.getAttribute('data-updated');
+    const dk  = sec + ':' + k;
+    if (dismissals[dk] && dismissals[dk].updated_at !== u) {
+      delete dismissals[dk];
+      dismissChanged = true;
+    }
+  });
+  if (dismissChanged) saveDismissals();
+
+  function isDismissed(el) {
+    const sec = el.getAttribute('data-section');
+    const k   = el.getAttribute('data-key');
+    const u   = el.getAttribute('data-updated');
+    if (!sec || !k || !u) return false;
+    const dk  = sec + ':' + k;
+    return !!(dismissals[dk] && dismissals[dk].updated_at === u);
+  }
+
+  // ---- Show-dismissed checkbox ---------------------------------------
+  let showDismissed = false;
+  try { showDismissed = localStorage.getItem(SHOW_DISMISSED_KEY) === '1'; } catch (e) {}
+  if (showCb) showCb.checked = showDismissed;
+
+  // ---- Org filter state ----------------------------------------------
+  let orgFilter = '_all';
+  try { orgFilter = localStorage.getItem(ORG_FILTER_KEY) || '_all'; } catch (e) {}
+  if (orgFilter !== '_all') {
+    const sel = '.filter-btn[data-org="' + orgFilter.replace(/"/g, '\\\\"') + '"]';
+    if (!document.querySelector(sel)) orgFilter = '_all';
+  }
+
+  // ---- Render pass: combine org filter + dismissal visibility, then
+  // recompute section badges and per-org button counts from the DOM. The
+  // server-side counts shipped in the markup are correct only for "no
+  // dismissals", so we always recompute here.
+  function applyState() {
+    document.body.setAttribute('data-org-filter', orgFilter);
+
+    document.querySelectorAll('.item').forEach(el => {
+      const orgMatches = (orgFilter === '_all') || (el.getAttribute('data-org') === orgFilter);
+      const dismissed = isDismissed(el);
+      el.classList.toggle('dismissed', dismissed);
+      const visible = orgMatches && (!dismissed || showDismissed);
       el.style.display = visible ? '' : 'none';
+      const btn = el.querySelector('.dismiss-btn');
+      if (btn) {
+        btn.title = dismissed ? 'Restore (un-dismiss)' : 'Dismiss until any GitHub update';
+        btn.textContent = dismissed ? '↶' : '✕';
+      }
     });
-    // Update each section's count badge and toggle its filter-empty placeholder.
+
+    document.querySelectorAll('.repo').forEach(g => {
+      const orgMatches = (orgFilter === '_all') || (g.getAttribute('data-org') === orgFilter);
+      if (!orgMatches) { g.style.display = 'none'; return; }
+      const anyVisible = Array.from(g.querySelectorAll('.item'))
+                              .some(it => it.style.display !== 'none');
+      g.style.display = anyVisible ? '' : 'none';
+    });
+
     document.querySelectorAll('.section').forEach(sec => {
-      const key = sec.id.replace(/^sec-/, '');
-      const counts = COUNTS[key] || {};
-      const total = counts._all || 0;
-      const n = (org === '_all') ? total : (counts[org] || 0);
+      const items = sec.querySelectorAll('.item');
+      let visibleN = 0;
+      items.forEach(el => { if (el.style.display !== 'none') visibleN++; });
       const badge = sec.querySelector('.sec-count');
-      if (badge) badge.textContent = n;
+      if (badge) badge.textContent = visibleN;
       const fe = sec.querySelector('.filter-empty');
-      if (fe) fe.style.display = (org !== '_all' && n === 0 && total > 0) ? '' : 'none';
+      if (fe) fe.style.display = (orgFilter !== '_all' && visibleN === 0 && items.length > 0) ? '' : 'none';
     });
-    // Active-button styling.
+
+    // Per-org button counts: unique items per org, deduped by data-key
+    // across sections, respecting both the dismissal state and the
+    // show-dismissed toggle (but ignoring the active org filter — each
+    // button shows its own scope).
     document.querySelectorAll('.filter-btn').forEach(b => {
-      b.classList.toggle('active', b.getAttribute('data-org') === org);
+      const org = b.getAttribute('data-org');
+      const seen = new Set();
+      document.querySelectorAll('.item').forEach(el => {
+        const elOrg = el.getAttribute('data-org');
+        if (org !== '_all' && elOrg !== org) return;
+        if (isDismissed(el) && !showDismissed) return;
+        const dk = el.getAttribute('data-key') || '';
+        if (dk) seen.add(dk);
+      });
+      const cnt = b.querySelector('.cnt');
+      if (cnt) cnt.textContent = seen.size;
+      b.classList.toggle('active', org === orgFilter);
     });
-    try { localStorage.setItem(ORG_FILTER_KEY, org); } catch (e) {}
+
+    try {
+      localStorage.setItem(ORG_FILTER_KEY, orgFilter);
+      localStorage.setItem(SHOW_DISMISSED_KEY, showDismissed ? '1' : '0');
+    } catch (e) {}
   }
 
   document.querySelectorAll('.filter-btn').forEach(b => {
-    b.addEventListener('click', () => applyOrgFilter(b.getAttribute('data-org')));
+    b.addEventListener('click', () => {
+      orgFilter = b.getAttribute('data-org') || '_all';
+      applyState();
+    });
   });
 
-  // Restore the previously chosen filter, but only if a matching button still exists.
-  let savedFilter = '_all';
-  try { savedFilter = localStorage.getItem(ORG_FILTER_KEY) || '_all'; } catch (e) {}
-  if (savedFilter !== '_all') {
-    const sel = '.filter-btn[data-org="' + savedFilter.replace(/"/g, '\\"') + '"]';
-    if (!document.querySelector(sel)) savedFilter = '_all';
+  document.querySelectorAll('.dismiss-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = btn.closest('.item');
+      if (!item) return;
+      const sec = item.getAttribute('data-section');
+      const k   = item.getAttribute('data-key');
+      const u   = item.getAttribute('data-updated');
+      if (!sec || !k || !u) return;
+      const dk  = sec + ':' + k;
+      if (dismissals[dk] && dismissals[dk].updated_at === u) {
+        delete dismissals[dk];
+      } else {
+        dismissals[dk] = { updated_at: u, dismissed_at: new Date().toISOString() };
+      }
+      saveDismissals();
+      applyState();
+    });
+  });
+
+  if (showCb) {
+    showCb.addEventListener('change', () => {
+      showDismissed = showCb.checked;
+      applyState();
+    });
   }
-  applyOrgFilter(savedFilter);
+
+  applyState();
 
   // Run-task button.
   if (!refreshBtn) return;
@@ -494,7 +639,7 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
 """
 
     summary_html = f'<div class="summary">{esc(agent_summary)}</div>' if agent_summary else ""
-    js_filled = js.replace("__COUNTS_JSON__", counts_json)
+    js_filled = js
 
     return f"""<!doctype html>
 <html lang="en">
@@ -513,6 +658,7 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
   <div class="actions">
     <button id="refreshBtn" type="button">Run task now</button>
     <button id="themeBtn" type="button">Light theme</button>
+    <label class="show-dismissed"><input id="showDismissedCb" type="checkbox"> Show dismissed</label>
     <span id="status"></span>
   </div>
   {filter_bar_html}
