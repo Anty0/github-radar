@@ -27,6 +27,7 @@ This script does NOT produce critical/top_picks — those are the agent's job at
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -410,7 +411,7 @@ def fetch_pr_review_threads(owner, name, number):
                 reviewThreads(first:50, after:$c){
                   pageInfo{ hasNextPage endCursor }
                   nodes{ id isResolved
-                    comments(first:50){ nodes{ author{login} createdAt } }
+                    comments(first:50){ nodes{ author{login} createdAt body } }
                   } } } } }""",
             {"o": owner, "n": name, "num": number, "c": cursor},
         )
@@ -465,7 +466,7 @@ def fetch_discussion_comments(owner, name, number):
 def thread_needs_response(comments, mention_only=False):
     """Given an ordered list of comments [{author, created_at}], decide if I should respond.
 
-    A thread is "waiting on me" iff:
+    A thread is "waiting on me" if:
       - I have at least one comment in it (commenter case) OR I'm mentioned (mention case), AND
       - There exists a non-bot, non-me comment chronologically after my last comment (or after the mention if I never commented).
     """
@@ -485,6 +486,59 @@ def thread_needs_response(comments, mention_only=False):
     return False
 
 
+def _has_atmention(text, viewer):
+    """Return True if `text` contains an @-mention of `viewer` (case-insensitive).
+
+    GitHub usernames are alnum + hyphens. We require a non-username boundary on
+    both sides of `@viewer` so that `email@viewer.com` and `@viewer-extra` don't
+    match.
+    """
+    if not text or not viewer:
+        return False
+    pattern = r'(?<![A-Za-z0-9_])@' + re.escape(viewer) + r'(?![A-Za-z0-9-])'
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
+def _ev_login(e):
+    """Author login from either a flat-author dict ({author: 'name'}) or nested ({author: {login}})."""
+    a = e.get("author")
+    if isinstance(a, dict):
+        return a.get("login")
+    return a
+
+
+def _ev_time(e):
+    return e.get("createdAt") or e.get("created_at")
+
+
+def find_unanswered_mention(events, viewer):
+    """Given a chrono list of events with `author`, `createdAt`/`created_at`, `body`,
+    decide whether there's an @-mention of `viewer` (by a non-viewer, non-bot author)
+    that `viewer` has not replied to.
+
+    Returns True if the latest such mention happens strictly before `viewer`'s last
+    event in the list (or `viewer` has no events at all after it).
+    """
+    t_mention = None
+    for e in events:
+        author = _ev_login(e)
+        if not author or author == viewer or is_bot(author):
+            continue
+        if _has_atmention(e.get("body") or "", viewer):
+            t = _ev_time(e)
+            if t and (t_mention is None or t > t_mention):
+                t_mention = t
+    if t_mention is None:
+        return False
+    for e in events:
+        if _ev_login(e) != viewer:
+            continue
+        t = _ev_time(e)
+        if t and t > t_mention:
+            return False
+    return True
+
+
 def _analyze_thread_candidate(it, mention_mode=False):
     owner, name = repo_of(it).split("/")
     number = it["number"]
@@ -492,14 +546,19 @@ def _analyze_thread_candidate(it, mention_mode=False):
     threads_waiting_count = 0
 
     comments = fetch_issue_comments(owner, name, number, is_pr)
-    norm = [{"author": {"login": (c.get("user") or {}).get("login")}, "createdAt": c["created_at"]} for c in comments]
+    norm = [{"author": {"login": (c.get("user") or {}).get("login")}, "createdAt": c["created_at"], "body": c.get("body") or ""} for c in comments]
     if mention_mode:
-        my_last = max((c["createdAt"] for c in norm if (c.get("author") or {}).get("login") == VIEWER), default=None)
-        if my_last:
-            if thread_needs_response(norm):
-                threads_waiting_count += 1
-        else:
-            # No comment by me yet but I was mentioned -> still unanswered
+        # Include the issue/PR body itself as a possible source of the @-mention
+        # (GitHub's `mentions:` search qualifier also matches body mentions).
+        events = list(norm)
+        body_author = (it.get("user") or {}).get("login")
+        if body_author and it.get("body"):
+            events.insert(0, {
+                "author": {"login": body_author},
+                "createdAt": it.get("created_at"),
+                "body": it.get("body") or "",
+            })
+        if find_unanswered_mention(events, VIEWER):
             threads_waiting_count += 1
     else:
         if thread_needs_response(norm):
@@ -511,9 +570,8 @@ def _analyze_thread_candidate(it, mention_mode=False):
                 continue
             tc = rt.get("comments", {}).get("nodes", []) or []
             if mention_mode:
-                if any((c.get("author") or {}).get("login") == VIEWER for c in tc):
-                    if thread_needs_response(tc):
-                        threads_waiting_count += 1
+                if find_unanswered_mention(tc, VIEWER):
+                    threads_waiting_count += 1
             else:
                 if thread_needs_response(tc):
                     threads_waiting_count += 1

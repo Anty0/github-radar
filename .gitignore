@@ -1,3 +1,6 @@
+# Python stuff
+__pycache__/
+
 # Secrets
 /.token
 /.load-env.sh
