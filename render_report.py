@@ -57,7 +57,10 @@ def label_chips(labels):
     return "".join(f'<span class="lbl">{esc(l)}</span>' for l in (labels or [])[:6])
 
 
-def render_item(it, section_key="", show_reason=False, show_closed_by=False, show_threads=False):
+DERIVED_SECTIONS = {"critical", "top_picks"}
+
+
+def render_item(it, section_key="", pick_rank=None, show_reason=False, show_closed_by=False, show_threads=False):
     title = esc(it.get("title", ""))
     url = esc(it.get("url", ""))
     repo = esc(it.get("repo", ""))
@@ -74,12 +77,17 @@ def render_item(it, section_key="", show_reason=False, show_closed_by=False, sho
         item_attrs.append(f'data-section="{esc(section_key)}"')
     if updated:
         item_attrs.append(f'data-updated="{updated}"')
+    if pick_rank is not None:
+        item_attrs.append(f'data-pick-rank="{int(pick_rank)}"')
     parts = [f'<div class="item" {" ".join(item_attrs)}>']
     parts.append(f'<div class="row1">{kind_badge(it.get("kind","issue"))}')
     parts.append(f'  <a href="{url}" target="_blank" rel="noopener" class="title">{title}</a>')
     parts.append(f'  <span class="ref">{repo}#{num}</span>')
     parts.append(f'  <span class="dismissed-tag">dismissed</span>')
-    if section_key and updated:
+    # Derived sections (critical, top_picks) have no own dismiss button —
+    # they inherit dismissed-ness from the item's "real" section. Dismiss
+    # the underlying item in its native section to hide it from picks.
+    if section_key and updated and section_key not in DERIVED_SECTIONS:
         parts.append(f'  <button class="dismiss-btn" type="button" title="Dismiss until any GitHub update">✕</button>')
     parts.append(f'</div>')
     extras = []
@@ -118,7 +126,13 @@ def render_section(key, data, title, hint):
         if not items:
             body = '<div class="empty">Nothing here.</div>'
         else:
-            body = "\n".join(render_item(it, section_key=key, show_reason=(key == "top_picks"), show_threads=True, show_closed_by=True) for it in items)
+            # Multi-candidate: the agent emits up to ~6 ordered candidates;
+            # JS shows the top 3 non-dismissed. Each gets a 1-based rank so
+            # the visibility cap is stable.
+            body = "\n".join(
+                render_item(it, section_key=key, pick_rank=rank, show_reason=(key == "top_picks"), show_threads=True, show_closed_by=True)
+                for rank, it in enumerate(items, start=1)
+            )
         count = len(items)
     else:
         grps = data or []
@@ -485,12 +499,31 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
   });
   if (dismissChanged) saveDismissals();
 
+  // Sections that are derived views — the agent picks them from items that
+  // also appear elsewhere. They don't get their own dismiss button; they
+  // inherit dismissed-ness from any "real" section the same item lives in.
+  const DERIVED_SECTIONS = new Set(['critical', 'top_picks']);
+  const PICK_VISIBLE_LIMIT = 3;  // show top-N non-dismissed candidates
+
   function isDismissed(el) {
     const sec = el.getAttribute('data-section');
     const k   = el.getAttribute('data-key');
     const u   = el.getAttribute('data-updated');
     if (!sec || !k || !u) return false;
-    const dk  = sec + ':' + k;
+    if (DERIVED_SECTIONS.has(sec)) {
+      // Cross-section check: any dismissal of this item (in any "real"
+      // section) with matching updated_at counts as dismissed for the pick.
+      for (const dk in dismissals) {
+        const colon = dk.indexOf(':');
+        if (colon < 0) continue;
+        const otherSec = dk.slice(0, colon);
+        if (DERIVED_SECTIONS.has(otherSec)) continue;     // don't self-reference
+        if (dk.slice(colon + 1) !== k) continue;
+        if (dismissals[dk].updated_at === u) return true;
+      }
+      return false;
+    }
+    const dk = sec + ':' + k;
     return !!(dismissals[dk] && dismissals[dk].updated_at === u);
   }
 
@@ -525,6 +558,28 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
         btn.title = dismissed ? 'Restore (un-dismiss)' : 'Dismiss until any GitHub update';
         btn.textContent = dismissed ? '↶' : '✕';
       }
+    });
+
+    // Derived sections (critical, top_picks) get a candidate pool from the
+    // agent. After the per-item visibility pass above, cap visible items at
+    // PICK_VISIBLE_LIMIT non-dismissed entries (ordered by data-pick-rank).
+    // When "Show dismissed" is on, show every candidate without the cap.
+    DERIVED_SECTIONS.forEach(secKey => {
+      const sec = document.getElementById('sec-' + secKey);
+      if (!sec) return;
+      const items = Array.from(sec.querySelectorAll('.item'))
+        .sort((a, b) => (parseInt(a.getAttribute('data-pick-rank') || '999', 10))
+                      - (parseInt(b.getAttribute('data-pick-rank') || '999', 10)));
+      let shown = 0;
+      items.forEach(el => {
+        const orgMatches = (orgFilter === '_all') || (el.getAttribute('data-org') === orgFilter);
+        const dismissed = isDismissed(el);
+        if (!orgMatches) { el.style.display = 'none'; return; }
+        if (showDismissed) { el.style.display = ''; return; }
+        if (dismissed) { el.style.display = 'none'; return; }
+        if (shown < PICK_VISIBLE_LIMIT) { el.style.display = ''; shown++; }
+        else { el.style.display = 'none'; }
+      });
     });
 
     document.querySelectorAll('.repo').forEach(g => {
@@ -606,20 +661,22 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
 
   applyState();
 
-  // Run-task button.
+  // Run-task button: trigger the scheduled task. No client-side state needs
+  // to be sent — the agent regenerates the candidate pool from scratch and
+  // dismissals stay local (kept in localStorage on this device).
   if (!refreshBtn) return;
   refreshBtn.addEventListener('click', async () => {
     refreshBtn.disabled = true;
-    status.textContent = 'Running task — this may take a minute…';
+    status.textContent = 'Triggering task…';
     try {
       if (window.cowork && window.cowork.runScheduledTask) {
         await window.cowork.runScheduledTask('daily-github-todo');
-        status.textContent = 'Task triggered. Refresh this artifact when it finishes.';
+        status.textContent = 'Task triggered — reload this artifact when it finishes.';
       } else {
         status.textContent = 'Run from the scheduled-tasks panel.';
       }
     } catch (e) {
-      status.textContent = 'Error: ' + (e && e.message || e);
+      status.textContent = 'Error triggering task: ' + (e && e.message || e);
     } finally {
       refreshBtn.disabled = false;
     }
