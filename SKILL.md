@@ -94,11 +94,11 @@ Validate your picks/critical items by listing comments, review notes, and simila
 
 ```bash
 # Issue / PR metadata + last few comments
-gh issue view 3201 --repo tolgee/tolgee-platform --comments
-gh pr view 3201 --repo tolgee/tolgee-platform --comments
+gh issue view 42 --repo OWNER/REPO --comments
+gh pr view 42 --repo OWNER/REPO --comments
 
 # PR review state (approved / changes-requested / pending)
-gh api repos/tolgee/tolgee-platform/pulls/3201/reviews \
+gh api repos/OWNER/REPO/pulls/42/reviews \
   --jq '.[] | {user: .user.login, state, submitted_at}'
 
 # Discussions (GraphQL only — gh has no first-class discussion subcommand)
@@ -107,7 +107,7 @@ gh api graphql -f query='
     repository(owner:$owner,name:$name){
       discussion(number:$number){ title updatedAt
         comments(last:5){ nodes { author{login} createdAt body } } } } }
-' -F owner=tolgee -F name=tolgee-platform -F number=3685
+' -F owner=OWNER -F name=REPO -F number=7
 ```
 
 If reading comments makes you realize an item is less important than it looked, check a few more candidates before settling.

@@ -179,7 +179,7 @@ def discover_identity():
     membersWithRole sub-field. A fine-grained token scoped to one org gets a
     FORBIDDEN error on membersWithRole for *other* orgs, and GraphQL responds by
     nulling the entire org node, which would otherwise silently drop that org
-    (e.g. tolgee) from the report. EXTRA_ORGS is unioned in afterwards for orgs
+    from the report. EXTRA_ORGS is unioned in afterwards for orgs
     the token can't enumerate at all (private membership).
 
     Solo detection runs as a separate, error-tolerant REST pass: an org counts

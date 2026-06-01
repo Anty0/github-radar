@@ -1,6 +1,6 @@
 # GitHub Radar
 
-> NOTE: Ask Claude Cowork to setup this scheduled task for you - all you need to do is add `*.github.com` to allowed domains, Claude can follow the steps bellow on it's own. It'll ask you for everything it needs to setup the task.
+> NOTE: Ask Claude Cowork to setup this scheduled task for you - all you need to do is add `*.github.com` to allowed domains, Claude can follow the steps below on its own. It'll ask you for everything it needs to setup the task.
 
 A Claude Cowork based scheduled task that produces a daily GitHub Radar report — a view of issues, PRs, reviews, mentions, and threads waiting on you across every org you belong to. The output is rendered into a self-contained HTML artifact (`github-radar`).
 
