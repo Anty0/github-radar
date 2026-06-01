@@ -43,7 +43,7 @@ A Claude Cowork based scheduled task that produces a daily GitHub Radar report �
    ```bash
    cd ~/Documents/Claude/Scheduled
    rm -rf github-radar
-   git clone <path-or-url-to-this-repo> github-radar
+   git clone https://github.com/Anty0/github-radar.git github-radar
    ```
 
 4. **Drop in your GitHub token.**
@@ -67,7 +67,7 @@ Requirements: a POSIX shell, `bash`, `python3`, `git`, and network access. The r
 1. **Clone the repo and add your token** (same as steps 3–4 above, anywhere on disk — it doesn't have to live under `~/Documents/Claude/Scheduled/`):
 
    ```bash
-   git clone <path-or-url-to-this-repo> github-radar
+   git clone https://github.com/Anty0/github-radar.git github-radar
    cd github-radar
    printf '%s' 'ghp_yourTokenHere' > .token
    chmod 600 .token
@@ -89,3 +89,7 @@ Requirements: a POSIX shell, `bash`, `python3`, `git`, and network access. The r
    ```
 
    Then point your browser at `outputs/$(date -u +%Y-%m-%d)_01/report.html` when you want to read it (or wire it into whatever viewer you prefer).
+
+## License
+
+Released under the [MIT License](LICENSE).
