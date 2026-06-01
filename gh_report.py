@@ -67,7 +67,7 @@ SOLO_SCOPES = []
 HEADERS = {
     "Authorization": f"bearer {TOKEN}",
     "Accept": "application/vnd.github+json",
-    "User-Agent": "Anty0-daily-todo-report",
+    "User-Agent": "github-radar",
 }
 
 
@@ -268,7 +268,7 @@ def to_obj(item, kind=None):
 
 
 def order_repos(repo_names):
-    """Sort: org repos first in ORGS order, then user's own (Anty0/*) alphabetically, then anything else."""
+    """Sort: org repos first in ORGS order, then viewer's own (VIEWER/*) alphabetically, then anything else."""
     def key(r):
         owner = r.split("/", 1)[0]
         if owner in ORGS:

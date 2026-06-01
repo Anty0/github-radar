@@ -7,7 +7,7 @@ You are running the daily GitHub Radar report. Each run is a fresh session with 
 
 ## Location
 
-When following text mentions `{HOME}`, it refers to `/Users/anty/Documents/Claude/Scheduled/github-radar` path - substitute all `{HOME}` occurences before executing.
+When following text mentions `{HOME}`, it refers to the absolute path of the directory containing this `SKILL.md` file (typically `~/Documents/Claude/Scheduled/github-radar` on macOS, but Cowork may surface a different absolute path in the sandbox — use whichever path is shown to you for this scheduled task). Substitute all `{HOME}` occurrences before executing.
 
 ## Plan
 
@@ -66,7 +66,7 @@ Read `$WORK_DIR/report.json`. The JSON shape is:
 }
 ```
 
-`solo_scopes` = the viewer's personal namespace + any orgs where they're the sole member. The user doesn't use the assignees field in these scopes (no one else to assign to), so the script treats everything open there as implicitly the user's. Keep that in mind when reasoning about priorities — a Anty0/* item with no assignee is still very much "on the user's plate".
+`solo_scopes` = the viewer's personal namespace + any orgs where they're the sole member. The user doesn't use the assignees field in these scopes (no one else to assign to), so the script treats everything open there as implicitly the user's. Keep that in mind when reasoning about priorities — a `<viewer>/*` item (where `<viewer>` is the JSON's `viewer` field) with no assignee is still very much "on the user's plate".
 
 Each item dict has: repo, number, title, url, kind ("issue"/"pr"/"discussion"), state, author, assignees, labels, comments, draft, created_at, updated_at. The user wants the daily picks to be **your judgement**, not an algorithm. Read through the report and ask yourself:
 
