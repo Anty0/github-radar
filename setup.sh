@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Daily GitHub TODO — per-run setup.
+# GitHub Radar — per-run setup.
 #
 # Resolves SCRIPTS_DIR / WORK_DIR / GH_TOKEN and writes them to
 # $SCRIPTS_DIR/.load-env.sh, which every subsequent shell sources via:

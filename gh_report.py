@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily GitHub TODO report.
+"""GitHub Radar — daily GitHub digest.
 
 Talks to api.github.com over plain HTTPS using a PAT in the GH_TOKEN env var.
 Emits a JSON document on stdout with the day's categorised data:

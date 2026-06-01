@@ -670,7 +670,7 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
     status.textContent = 'Triggering task…';
     try {
       if (window.cowork && window.cowork.runScheduledTask) {
-        await window.cowork.runScheduledTask('daily-github-todo');
+        await window.cowork.runScheduledTask('github-radar');
         status.textContent = 'Task triggered — reload this artifact when it finishes.';
       } else {
         status.textContent = 'Run from the scheduled-tasks panel.';
@@ -702,13 +702,13 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>GitHub TODO — {viewer}</title>
+<title>GitHub Radar — {viewer}</title>
 <script>{early_script}</script>
 <style>{style}</style>
 </head>
 <body>
   <div class="header">
-    <h1>GitHub TODO — {viewer}</h1>
+    <h1>GitHub Radar — {viewer}</h1>
     <div class="meta">Generated {esc(gen_human)} · orgs: {esc(orgs) or "(none)"} (priority order)</div>
     {summary_html}
   </div>

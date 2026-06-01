@@ -1,8 +1,8 @@
-# Daily GitHub TODO
+# GitHub Radar
 
 > NOTE: Ask Claude Cowork to setup this scheduled task for you - all you need to do is add `*.github.com` to allowed domains, Claude can follow the steps bellow on it's own. It'll ask you for everything it needs to setup the task.
 
-A Claude Cowork based scheduled task that produces a daily GitHub TODO report — a view of issues, PRs, reviews, mentions, and threads waiting on you across every org you belong to. The output is rendered into a self-contained HTML artifact (`daily-github-todo`).
+A Claude Cowork based scheduled task that produces a daily GitHub Radar report — a view of issues, PRs, reviews, mentions, and threads waiting on you across every org you belong to. The output is rendered into a self-contained HTML artifact (`github-radar`).
 
 ## Prerequisites
 
@@ -27,30 +27,30 @@ A Claude Cowork based scheduled task that produces a daily GitHub TODO report �
 ## Install the skill in Claude Cowork
 
 1. **Create an empty scheduled task in Cowork.**
-   Open Claude Cowork → Scheduled Tasks → *New scheduled task*. Name it `daily-github-todo` (the name becomes the directory name, and the artifact id in the rendered HTML expects this slug — if you pick a different name you'll need to update `id: "daily-github-todo"` in `SKILL.md`'s STEP 3). Leave the prompt body empty and save. Pick whatever schedule you want (e.g. every morning at 08:00).
+   Open Claude Cowork → Scheduled Tasks → *New scheduled task*. Name it `github-radar` (the name becomes the directory name, and the artifact id in the rendered HTML expects this slug — if you pick a different name you'll need to update `id: "github-radar"` in `SKILL.md`'s STEP 3 and `runScheduledTask('github-radar')` in `render_report.py`). Leave the prompt body empty and save. Pick whatever schedule you want (e.g. every morning at 08:00).
 
 2. **Locate the directory Cowork just created.**
    Cowork will have generated:
 
    ```
-   ~/Documents/Claude/Scheduled/daily-github-todo/
+   ~/Documents/Claude/Scheduled/github-radar/
    └── SKILL.md          # auto-generated stub from your empty prompt
    ```
 
 3. **Replace that directory with this repository.**
-   Delete the auto-generated directory and clone this repo in its place — the folder name must stay `daily-github-todo` (or whatever name you chose in step 1):
+   Delete the auto-generated directory and clone this repo in its place — the folder name must stay `github-radar` (or whatever name you chose in step 1):
 
    ```bash
    cd ~/Documents/Claude/Scheduled
-   rm -rf daily-github-todo
-   git clone <path-or-url-to-this-repo> daily-github-todo
+   rm -rf github-radar
+   git clone <path-or-url-to-this-repo> github-radar
    ```
 
 4. **Drop in your GitHub token.**
    Create `.token` at the repo root and paste your PAT into it (single line, no surrounding whitespace — `setup.sh` strips whitespace but won't tolerate an empty file):
 
    ```bash
-   cd ~/Documents/Claude/Scheduled/daily-github-todo
+   cd ~/Documents/Claude/Scheduled/github-radar
    printf '%s' 'ghp_yourTokenHere' > .token
    chmod 600 .token
    ```
@@ -67,8 +67,8 @@ Requirements: a POSIX shell, `bash`, `python3`, `git`, and network access. The r
 1. **Clone the repo and add your token** (same as steps 3–4 above, anywhere on disk — it doesn't have to live under `~/Documents/Claude/Scheduled/`):
 
    ```bash
-   git clone <path-or-url-to-this-repo> daily-github-todo
-   cd daily-github-todo
+   git clone <path-or-url-to-this-repo> github-radar
+   cd github-radar
    printf '%s' 'ghp_yourTokenHere' > .token
    chmod 600 .token
    ```
@@ -85,7 +85,7 @@ Requirements: a POSIX shell, `bash`, `python3`, `git`, and network access. The r
 3. **(Optional) Schedule it yourself.** Drop something like this into your crontab to get a fresh report every weekday at 08:00:
 
    ```
-   0 8 * * 1-5  cd /path/to/daily-github-todo && bash run.sh >/dev/null 2>&1
+   0 8 * * 1-5  cd /path/to/github-radar && bash run.sh >/dev/null 2>&1
    ```
 
    Then point your browser at `outputs/$(date -u +%Y-%m-%d)_01/report.html` when you want to read it (or wire it into whatever viewer you prefer).

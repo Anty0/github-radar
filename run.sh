@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Daily GitHub TODO — non-AI runner.
+# GitHub Radar — non-AI runner.
 #
 # Mirrors SKILL.md without the agent reasoning step. Produces the same
 # report.html that the scheduled task would, but without "Critical" or

@@ -1,13 +1,13 @@
 ---
-name: daily-github-todo
-description: Daily GitHub TODO report
+name: github-radar
+description: GitHub Radar
 ---
 
-You are running the daily GitHub TODO report. Each run is a fresh session with no memory of previous runs — everything you need is in this prompt and the helper scripts sitting next to it.
+You are running the daily GitHub Radar report. Each run is a fresh session with no memory of previous runs — everything you need is in this prompt and the helper scripts sitting next to it.
 
 ## Location
 
-When following text mentions `{HOME}`, it refers to `/Users/anty/Documents/Claude/Scheduled/daily-github-todo` path - substitute all `{HOME}` occurences before executing.
+When following text mentions `{HOME}`, it refers to `/Users/anty/Documents/Claude/Scheduled/github-radar` path - substitute all `{HOME}` occurences before executing.
 
 ## Plan
 
@@ -143,18 +143,18 @@ wc -c "$WORK_DIR/report.html"
 echo "report at: $WORK_DIR/report.html"
 ```
 
-Quick sanity check: Read the first ~30 lines of `$WORK_DIR/report.html` to confirm it's well-formed HTML and contains a `<title>GitHub TODO`. If `wc -c` returned < 1000 bytes, write a minimal fallback HTML into `$WORK_DIR/report.html` noting the error from `$WORK_DIR/timings.txt` and use that instead.
+Quick sanity check: Read the first ~30 lines of `$WORK_DIR/report.html` to confirm it's well-formed HTML and contains a `<title>GitHub Radar`. If `wc -c` returned < 1000 bytes, write a minimal fallback HTML into `$WORK_DIR/report.html` noting the error from `$WORK_DIR/timings.txt` and use that instead.
 
 Then call `mcp__cowork__update_artifact` with:
-  id: "daily-github-todo"
-  update_summary: "Daily GitHub TODO refresh — <today's date YYYY-MM-DD>"
+  id: "github-radar"
+  update_summary: "GitHub Radar refresh — <today's date YYYY-MM-DD>"
   html_path: the absolute path printed by the bash block above (i.e. `$WORK_DIR/report.html`). Echo it in a bash call if you need the literal to paste.
   mcp_tools: `[]` — the page uses `sendPrompt(...)` (no MCP write tools needed). Passing the empty list explicitly resets any prior allowlist; if you omit `mcp_tools` the previous list is retained.
 
 ==========================================================
 Finish with a one-line confirmation in chat:
 
-> Updated the daily-github-todo artifact. Top picks for today:
+> Updated the github-radar artifact. Top picks for today:
 > - <repo#num> — <title> (<reason>)
 > - …
 
