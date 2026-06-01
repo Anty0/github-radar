@@ -161,3 +161,22 @@ Finish with a one-line confirmation in chat:
 Pull those lines from `$WORK_DIR/picks.json`. If `critical` was non-empty, mention how many critical items you flagged.
 
 If — and only if — you hit any issues during the run (script errors, unexpected gh failures, missing data, scope problems, fallbacks you had to take, anything you had to work around), append a short `**Issues encountered:**` section below the confirmation. Keep it to a few bullets, one line each, naming the step and what happened. Omit the section entirely when the run was butter smooth.
+
+==========================================================
+STEP 4 — Check for repo updates.
+
+After the confirmation message, run a quick update check on the repo itself so the user knows if there are upstream changes waiting:
+
+```bash
+cd "{HOME}" && git fetch --all 2>&1 && git status
+```
+
+Interpret the result and tell the user about it as a single short line appended after the confirmation (and after the optional `**Issues encountered:**` section if present):
+
+- If `git fetch` reports "does not appear to be a git repository", "No configured remotes", or prints nothing because no remotes exist → say: `> Repo update check: no remote configured, skipping.`
+- If `git status` shows `Your branch is up to date with ...` → say: `> Repo update check: up to date.`
+- If `git status` shows `Your branch is behind ... by N commits` → say: `> Repo update check: **N new commit(s) available** — I can update it for you, just ask.`
+- If `git status` shows `Your branch and ... have diverged` or local commits ahead → say: `> Repo update check: local branch has diverged from upstream — let me know if I can help with merging the changes.`
+- If anything else goes wrong (auth failure, network error, unexpected output) → say: `> Repo update check failed: <one-line summary>.` and add it to `**Issues encountered:**`.
+
+Keep this to one line. Don't repeat the raw `git status` output in chat.
