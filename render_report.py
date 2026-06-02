@@ -432,6 +432,14 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
 .show-dismissed { display: inline-flex; align-items: center; gap: 5px; color: var(--fg-muted);
                   font-size: 12px; cursor: pointer; user-select: none; }
 .show-dismissed input { margin: 0; cursor: pointer; }
+/* Freshness highlight: items updated within the last few days get a green
+   tint + left border that fades linearly to nothing as they age out of the
+   window. Intensity (--fresh-a, 0..1) is set per-item by JS. */
+:root { --fresh-rgb: 63,185,80; }
+:root[data-theme="light"] { --fresh-rgb: 26,127,55; }
+.item.fresh { background-color: rgba(var(--fresh-rgb), calc(var(--fresh-a, 0) * 0.13));
+              border-left-color: rgba(var(--fresh-rgb), calc(var(--fresh-a, 0) * 0.85)); }
+.item.fresh:hover { background-color: var(--surface-hover); border-left-color: var(--link); }
 """
 
     js = """
@@ -658,6 +666,30 @@ body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, san
       applyState();
     });
   }
+
+  // ---- Freshness highlight --------------------------------------------
+  // Items whose updated_at is within FRESH_WINDOW_DAYS get a tint + left
+  // border whose intensity fades from 1 (just updated) to 0 (window edge),
+  // so a freshly-updated item stands out even in a long list. Computed
+  // against the viewing time, independent of org filter / dismissal state.
+  const FRESH_WINDOW_DAYS = 3;
+  function applyFreshness() {
+    const now = Date.now();
+    document.querySelectorAll('.item[data-updated]').forEach(el => {
+      const u = Date.parse(el.getAttribute('data-updated'));
+      if (isNaN(u)) { el.classList.remove('fresh'); el.style.removeProperty('--fresh-a'); return; }
+      const ageDays = (now - u) / 86400000;
+      if (ageDays >= FRESH_WINDOW_DAYS) {
+        el.classList.remove('fresh');
+        el.style.removeProperty('--fresh-a');
+        return;
+      }
+      const intensity = Math.max(0, Math.min(1, 1 - ageDays / FRESH_WINDOW_DAYS));
+      el.style.setProperty('--fresh-a', intensity.toFixed(3));
+      el.classList.add('fresh');
+    });
+  }
+  applyFreshness();
 
   applyState();
 
