@@ -318,7 +318,39 @@ def section_authored():
 def section_review_requested():
     items = search_issues(f"is:open is:pr review-requested:{VIEWER}")
     if isinstance(items, dict): return items
-    return group_by_repo([to_obj(i) for i in items])
+    # Drop PRs that are already approved and have no outstanding change
+    # requests — they don't need a review, so they shouldn't sit here. We look
+    # at each reviewer's *latest* review (ignoring bots and plain comments): if
+    # anyone still wants changes the PR stays; otherwise an approval drops it.
+    # Only APPROVED / CHANGES_REQUESTED are counted. A DISMISSED state (e.g. an
+    # approval invalidated when new commits are pushed under branch protection)
+    # is intentionally ignored, so a PR whose approval was dismissed reappears
+    # here until it is re-approved.
+    jobs = {}
+    for it in items:
+        pr_url = (it.get("pull_request") or {}).get("url")
+        if pr_url:
+            jobs[it["number"]] = POOL.submit(_req, pr_url + "/reviews")
+    out = []
+    for it in items:
+        reviews = jobs.get(it["number"])
+        if reviews is not None:
+            res = reviews.result()
+            if isinstance(res, list):
+                latest = {}  # reviewer login -> latest blocking/approving state
+                for r in res:
+                    state = (r or {}).get("state")
+                    if state not in ("APPROVED", "CHANGES_REQUESTED"):
+                        continue
+                    login = ((r.get("user") or {}).get("login")) or ""
+                    if is_bot(login):
+                        continue
+                    latest[login] = state  # reviews arrive in chronological order
+                states = set(latest.values())
+                if "APPROVED" in states and "CHANGES_REQUESTED" not in states:
+                    continue
+        out.append(to_obj(it))
+    return group_by_repo(out)
 
 
 def section_new_unattended():
